@@ -126,10 +126,10 @@ let freq={};for(let e of data)freq[e.code]=(freq[e.code]||0)+1;$('eventFrequency
 let service=phaseService(data),aog=[];for(let [ch,m] of Object.entries(mapping)){if(!m.phase)continue;let arrivals=data.filter(e=>e.code===81&&String(e.param)===ch),valid=arrivals.filter(e=>service.some(g=>g.p===+m.phase&&e.t>=g.start&&e.t<g.end));aog.push({ch,phase:m.phase,role:m.role,arrivals:arrivals.length,on:valid.length})}$('aogTable').innerHTML=aog.length?'<table><tr><th>Channel</th><th>Phase</th><th>Role</th><th>ON</th><th>During green</th><th>Share</th></tr>'+aog.map(x=>`<tr><td>${x.ch}</td><td>${x.phase}</td><td>${esc(x.role)}</td><td>${x.arrivals}</td><td>${x.on}</td><td>${x.arrivals?fmt(100*x.on/x.arrivals)+'%':'—'}</td></tr>`).join('')+'</table>':'Assign detector channels in the mapping tab to see an exploratory green-state ON transition share.'}
 
 
-/* Screening only: not a port of atspm-detector and not calibrated probabilities.
+/* Screening only: local heuristic, not calibrated probabilities.
    Uses association of detector ON transitions with bounded observed phase greens.
    Never silently overrides an imported model output or a manually edited row. */
-/* Signal Insight Lab's original rule-based classifier, NOT atspm-detector.
+/* Signal Insight Lab's independent rule-based detector classifier.
  * Heuristic evidence is descriptive and not calibrated model probability.
  * Never replace a manually edited or imported trained-model mapping.
  */
@@ -200,7 +200,7 @@ function drawMapping(){
  const m=mapping[ch]||{phase:0,role:'unknown',notes:''},confidence=m.model?(m.model.source==='browser-heuristic'?('Phase '+(m.model.candidatePhase||'—')+' · '+Math.round((m.model.phaseProb||0)*100)+'% green ON · function suggestion: '+(m.model.function||'unknown')+' · median ON '+(Number.isFinite(m.model.medianOn)?m.model.medianOn.toFixed(1)+'s':'—')):([m.model.phaseProb,m.model.functionProb].map(v=>Number.isFinite(v)?Math.round(v*100)+'%':'—').join(' / '))):'Manual';
  const role=String(m.role||'unknown'),predPhase=m.model?.candidatePhase||0,predRole=String(m.model?.function||'unknown'), evidence=m.model?.source==='browser-heuristic'?('Green ON '+Math.round((m.model.phaseProb||0)*100)+'% · median ON '+(Number.isFinite(m.model.medianOn)?m.model.medianOn.toFixed(1)+'s':'—')+' · review required'):(m.model?confidence:'Manual');
  return '<tr><td>'+ch+'</td><td><select data-map-phase="'+ch+'"><option value="0">Unassigned</option>'+Array.from({length:16},(_,i)=>'<option value="'+(i+1)+'" '+(+m.phase===i+1?'selected':'')+'>'+(i+1)+'</option>').join('')+'</select></td><td><select data-map-role="'+ch+'">'+['unknown','stop-bar','advance','count','yellow_red','mid','queue','pedestrian','bike','other'].map(v=>'<option value="'+v+'" '+(role===v?'selected':'')+'>'+v+'</option>').join('')+'</select></td><td>'+esc(predPhase?'Phase '+predPhase:'Uncertain')+'</td><td>'+esc(predRole)+'</td><td>'+esc(evidence)+'</td><td><button type="button" data-apply="'+ch+'" '+(!predPhase&&predRole==='unknown'?'disabled':'')+'>Apply</button></td><td><input data-map-notes="'+ch+'" value="'+esc(m.notes||'')+'" placeholder="EB through, location..."></td></tr>'
- }).join('')+'</table>':'<div class="empty">Upload a .db, import atspm-detector prediction CSV, or manually add a detector channel.</div>';
+ }).join('')+'</table>':'<div class="empty">Upload a .db file or manually add a detector channel.</div>';
  for(const btn of $('mapGrid').querySelectorAll('button[data-apply]'))btn.onclick=()=>{const id=btn.dataset.apply,m=mapping[id];if(!m?.model)return;const phase=+(m.model.candidatePhase||0),role=String(m.model.function||'unknown');if(!confirm('Apply suggested phase '+(phase||'unknown')+' and role '+role+' for detector '+id+'? These are unvalidated predictions.'))return;if(phase>=1&&phase<=16)m.phase=phase;if(['stop-bar','advance','count','yellow_red','mid','bike','other'].includes(role))m.role=role;m.manualEdited=true;drawMapping();if(data.length)drawMetrics()};
  for(let inp of $('mapGrid').querySelectorAll('select,input'))inp.onchange=()=>{
  let ch=inp.dataset.mapPhase??inp.dataset.mapRole??inp.dataset.mapNotes;
