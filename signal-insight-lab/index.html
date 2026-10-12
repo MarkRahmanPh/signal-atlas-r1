@@ -129,45 +129,75 @@ let service=phaseService(data),aog=[];for(let [ch,m] of Object.entries(mapping))
 /* Screening only: not a port of atspm-detector and not calibrated probabilities.
    Uses association of detector ON transitions with bounded observed phase greens.
    Never silently overrides an imported model output or a manually edited row. */
+/* Signal Insight Lab's original rule-based classifier, NOT atspm-detector.
+ * Heuristic evidence is descriptive and not calibrated model probability.
+ * Never replace a manually edited or imported trained-model mapping.
+ */
 function browserSuggestMappings(force=false){
  if(!data.length)return;
- const intervals=phaseService(data);
- const phases=[...new Set(intervals.map(x=>x.p))];
- const onByDetector=new Map();
- for(const e of data)if(e.code===81){if(!onByDetector.has(e.param))onByDetector.set(e.param,[]);onByDetector.get(e.param).push(e.t)}
- const min=data[0].t,max=data.at(-1).t,coverage=(max-min)/60;
- for(const [ch,times] of onByDetector){
-  const old=mapping[ch];
-  if(old && !force)continue;
-  if(old && old.model?.source!=='browser-heuristic')continue;
-  const scores=phases.map(phase=>{
-    const iv=intervals.filter(x=>x.p===phase);
-    let hits=0,serviceSeconds=0;
-    for(const v of iv)serviceSeconds+=v.end-v.start;
-    for(const t of times){if(iv.some(v=>t>=v.start&&t<v.end))hits++}
-    const share=times.length?hits/times.length:0;
-    const base=(max>min)?serviceSeconds/(max-min):0;
-    return {phase,share,base,lift:share-base,hits};
-  }).sort((a,b)=>b.lift-a.lift);
-  const best=scores[0],runner=scores[1];
-  // These are descriptive evidence thresholds, not ML confidence scores.
-  const evidence=best && times.length>=10 && coverage>=20 && best.hits>=6 && best.lift>=.16 && best.lift-(runner?.lift||0)>=.08;
-  mapping[ch]={
-    phase:evidence?best.phase:0,role:'unknown',
-    notes:old?.notes||'',
-    model:{source:'browser-heuristic',phaseProb:best?best.share:NaN,functionProb:NaN,review:true,
-      status:evidence?'Preliminary association; verify':'Insufficient/unambiguous evidence',candidatePhase:best?.phase||0,
-      function:'unknown',sampleCount:times.length,greenShare:best?.share,greenLift:best?.lift}
-  };
+ const greens=phaseService(data),phases=[...new Set(greens.map(g=>g.p))].sort((a,b)=>a-b);
+ const start=data[0].t,end=data.at(-1).t,minutes=(end-start)/60;
+ const byCh=new Map();
+ for(const e of data)if(e.code===81||e.code===82){
+   if(!byCh.has(e.param))byCh.set(e.param,[]);
+   byCh.get(e.param).push(e);
+ }
+ for(const [ch,events] of byCh){
+   const old=mapping[ch];
+   if(old&&old.model?.source!=='browser-heuristic')continue;
+   if(old?.manualEdited)continue;
+   if(old&&!force&&old.model?.source==='browser-heuristic')continue;
+   const ons=events.filter(e=>e.code===81).map(e=>e.t),durations=[];
+   let active=null,unmatched=0;
+   for(const e of events){
+     if(e.code===81){if(active!==null)unmatched++;active=e.t}
+     else if(active===null)unmatched++;else{if(e.t>=active)durations.push({start:active,end:e.t,len:e.t-active});active=null}
+   }
+   const scores=phases.map(p=>{
+     const intervals=greens.filter(g=>g.p===p);
+     const seconds=intervals.reduce((s,g)=>s+g.duration,0);
+     const hits=ons.filter(t=>intervals.some(g=>t>=g.start&&t<g.end)).length;
+     const share=ons.length?hits/ons.length:0,baseline=(end>start)?seconds/(end-start):0;
+     return {p,hits,share,baseline,lift:share-baseline};
+   }).sort((x,y)=>y.lift-x.lift);
+   const first=scores[0],second=scores[1];
+   const supported=!!first&&minutes>=20&&ons.length>=10&&first.hits>=6&&first.lift>=.16&&first.lift-(second?.lift??0)>=.08;
+   const medianDur=durations.length?median(durations.map(x=>x.len)):NaN;
+   const longFraction=durations.length?durations.filter(x=>x.len>=3).length/durations.length:0;
+   let greenOcc=0,redOcc=0,greenSeconds=0,redSeconds=0;
+   if(first){
+     const ints=greens.filter(g=>g.p===first.p);
+     greenSeconds=ints.reduce((s,g)=>s+g.duration,0);
+     redSeconds=Math.max(0,(end-start)-greenSeconds);
+     for(const d of durations){
+       let overlap=0;
+       for(const g of ints)overlap+=Math.max(0,Math.min(g.end,d.end)-Math.max(g.start,d.start));
+       greenOcc+=overlap;redOcc+=Math.max(0,d.len-overlap);
+     }
+   }
+   const go=greenSeconds?greenOcc/greenSeconds:0,ro=redSeconds?redOcc/redSeconds:0;
+   // Conservative screening categories, not a detector placement measurement.
+   let fn='unknown',explanation='Actuation timing insufficient to distinguish detector type';
+   if(supported&&durations.length>=8&&unmatched<=events.length*.1){
+     if(medianDur>=2.0&&ro>=.08){fn='stop-bar';explanation='Long ON durations and red occupancy suggest presence detection'}
+     else if(medianDur<=.7&&longFraction<.08&&ons.length>=25){fn='count';explanation='Very short pulse-like actuations suggest a count detector; advance pulse detection remains possible'}
+     else if(medianDur<2&&first.share>=.65&&ro<.07&&ons.length>=20){fn='advance';explanation='Short, green-associated actuations with little red occupancy suggest advance detection'}
+   }
+   // Do not assign ambiguous function automatically: retain proposal for user review.
+   mapping[ch]={phase:supported?first.p:0,role:'unknown',notes:old?.notes||'',
+     model:{source:'browser-heuristic',review:true,phaseProb:first?.share??NaN,functionProb:NaN,
+       candidatePhase:first?.p||0,function:fn,functionEvidence:explanation,
+       status:supported?'Screening only — needs review':'Insufficient or ambiguous phase evidence',
+       sampleCount:ons.length,pairedPulses:durations.length,medianOn:medianDur,
+       redOccupancy:ro,greenOccupancy:go,greenLift:first?.lift??NaN}};
  }
 }
-
 function drawMapping(){
  const detected=[...new Set(data.filter(e=>e.code===81||e.code===82).map(e=>e.param))];
  const ids=[...new Set([...detected,...Object.keys(mapping).map(Number).filter(Number.isFinite)])].sort((a,b)=>a-b);
- $('mappingSummary').innerHTML='<p class="hint">'+detected.length+' channels observed in event log; '+ids.length+' available for mapping. Browser phase suggestions are generated from the uploaded event log (heuristic, not Shawn’s model). A blank phase means evidence was insufficient. All suggestions require review.</p>';
+ $('mappingSummary').innerHTML='<p class="hint">'+detected.length+' channels observed in event log; '+ids.length+' available for mapping. Automatic browser screening suggests detector phases AND function candidates from actuation timing. These are rule-based estimates, not calibrated confidence or Shawn’s model. All suggestions require field review.</p>';
  $('mapGrid').innerHTML=ids.length?'<table><tr><th>Detector</th><th>Phase</th><th>Role</th><th>Suggested phase / evidence</th><th>Review</th><th>Approach / notes</th></tr>'+ids.slice(0,300).map(ch=>{
- const m=mapping[ch]||{phase:0,role:'unknown',notes:''},confidence=m.model?(m.model.source==='browser-heuristic'?('Phase '+(m.model.candidatePhase||'—')+' · '+Math.round((m.model.phaseProb||0)*100)+'% ON in green · '+Math.round((m.model.greenLift||0)*100)+' pt lift'):([m.model.phaseProb,m.model.functionProb].map(v=>Number.isFinite(v)?Math.round(v*100)+'%':'—').join(' / '))):'Manual';
+ const m=mapping[ch]||{phase:0,role:'unknown',notes:''},confidence=m.model?(m.model.source==='browser-heuristic'?('Phase '+(m.model.candidatePhase||'—')+' · '+Math.round((m.model.phaseProb||0)*100)+'% green ON · function suggestion: '+(m.model.function||'unknown')+' · median ON '+(Number.isFinite(m.model.medianOn)?m.model.medianOn.toFixed(1)+'s':'—')):([m.model.phaseProb,m.model.functionProb].map(v=>Number.isFinite(v)?Math.round(v*100)+'%':'—').join(' / '))):'Manual';
  const role=String(m.role||'unknown');
  return '<tr><td>'+ch+'</td><td><select data-map-phase="'+ch+'"><option value="0">Unassigned</option>'+Array.from({length:16},(_,i)=>'<option value="'+(i+1)+'" '+(+m.phase===i+1?'selected':'')+'>'+(i+1)+'</option>').join('')+'</select></td><td><select data-map-role="'+ch+'">'+['unknown','stop-bar','advance','count','yellow_red','mid','queue','pedestrian','bike','other'].map(v=>'<option value="'+v+'" '+(role===v?'selected':'')+'>'+v+'</option>').join('')+'</select></td><td>'+esc(confidence)+'</td><td>'+esc(m.model?(m.model.source==='browser-heuristic'?'Review (heuristic)':(m.model.review?'Review':'Model')):'—')+'</td><td><input data-map-notes="'+ch+'" value="'+esc(m.notes||'')+'" placeholder="EB through, location..."></td></tr>'
  }).join('')+'</table>':'<div class="empty">Upload a .db, import atspm-detector prediction CSV, or manually add a detector channel.</div>';
@@ -177,11 +207,11 @@ function drawMapping(){
  if(inp.dataset.mapPhase!==undefined)mapping[ch].phase=+inp.value;
  else if(inp.dataset.mapRole!==undefined)mapping[ch].role=inp.value;
  else mapping[ch].notes=inp.value;
- if(mapping[ch].model)mapping[ch].model.review=true;
+ mapping[ch].manualEdited=true;if(mapping[ch].model)mapping[ch].model.review=true;
  if(data.length)drawMetrics();
  };
 }
-$('manualAdd').onclick=()=>{const ch=Number($('manualChannel').value);if(!Number.isInteger(ch)||ch<1||ch>9999){alert('Enter a channel number between 1 and 9999.');return}mapping[ch]??={phase:0,role:'unknown',notes:''};$('manualChannel').value='';drawMapping()};
+$('manualAdd').onclick=()=>{const ch=Number($('manualChannel').value);if(!Number.isInteger(ch)||ch<1||ch>9999){alert('Enter a channel number between 1 and 9999.');return}mapping[ch]??={phase:0,role:'unknown',notes:'',manualEdited:true};$('manualChannel').value='';drawMapping()};
 $('autoMap').onclick=()=>{browserSuggestMappings(true);drawMapping();if(data.length)drawMetrics()};
 function predictionCsvRows(txt){
  const rows=[];let row=[],cell='',quoted=false;
