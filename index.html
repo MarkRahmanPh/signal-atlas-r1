@@ -75,14 +75,14 @@ const DRIVE_DOC_INDEX=['drive-links/district-2c.json','drive-links/district-2b-a
 let driveCabinetDocs=new Map(), driveIndexStatus='Loading documents…';
 function renderCabinetDocuments(r){
   let target=$('cabinetDocumentLinks');
-  if(!target){target=document.createElement('section');target.id='cabinetDocumentLinks';target.style.cssText='margin-top:16px;border-top:1px solid #dce7f4;padding-top:15px';$('drawer').appendChild(target)}
+  if(!target){target=document.createElement('section');target.id='cabinetDocumentLinks';target.style.cssText='margin:13px 0 18px;border:1px solid #dce7f4;border-radius:12px;padding:14px;background:#f8fbff';$('drawerFields').before(target)}
   const id=String(r.id||r.name||'').match(/\b2[BC]\d{3}\b/i)?.[0]?.toUpperCase();
   const docs=id?(driveCabinetDocs.get(id)||[]):[];
   const section=(label,type,icon)=>{const items=docs.filter(x=>x.type===type);return '<div style="margin-top:12px"><div class="fieldname">'+icon+' '+label+'</div>'+(items.length?items.map(x=>'<a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer" class="btn" style="margin-top:7px;text-decoration:none;justify-content:flex-start;white-space:normal;overflow-wrap:anywhere">'+esc(x.name)+' ↗</a>').join(''):'<div class="fieldvalue" style="color:#8a9bae">No matched file available</div>')+'</div>'};
   target.innerHTML='<div class="eyebrow">CABINET DOCUMENTS</div>'+(driveIndexStatus==='Ready'?section('Cabinet Prints','pdf','📄')+section('Excel Configuration','excel','📊'):'<div class="fieldvalue">'+esc(driveIndexStatus)+'</div>');
 }
 async function loadCabinetDocuments(){
-  try{const responses=await Promise.all(DRIVE_DOC_INDEX.map(x=>fetch(x,{cache:'no-cache'})));for(const res of responses)if(!res.ok)throw Error('Document index HTTP '+res.status);const lists=await Promise.all(responses.map(res=>res.json()));const map=new Map();for(const d of lists.flat()){if(!/^2[BC]\d{3}$/.test(d.cab)||!['pdf','excel'].includes(d.type)||!/^https:\/\/drive\.google\.com\//.test(d.url))continue;if(!map.has(d.cab))map.set(d.cab,[]);if(!map.get(d.cab).some(x=>x.url===d.url))map.get(d.cab).push(d)}driveCabinetDocs=map;driveIndexStatus='Ready'}
+  try{const responses=await Promise.all(DRIVE_DOC_INDEX.map(x=>fetch(x,{cache:'no-cache'})));for(const res of responses)if(!res.ok)throw Error('Document index HTTP '+res.status);const lists=await Promise.all(responses.map(res=>res.json()));const map=new Map();for(const d of lists.flat()){if(!/^2[BC]\d{3}$/.test(d.cab)||!['pdf','excel'].includes(d.type)||!/^https:\/\/(?:drive|docs)\.google\.com\//.test(d.url))continue;if(!map.has(d.cab))map.set(d.cab,[]);if(!map.get(d.cab).some(x=>x.url===d.url))map.get(d.cab).push(d)}driveCabinetDocs=map;driveIndexStatus='Ready'}
   catch(e){console.warn('Cabinet document links not loaded',e);driveIndexStatus='Cabinet documents temporarily unavailable'}
   if(selected)renderCabinetDocuments(selected);
 }
