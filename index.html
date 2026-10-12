@@ -71,7 +71,7 @@ function renderList(){let list=$('signalList');if(!records.length){list.innerHTM
 function color(r){return '#4f93fb'}
 function renderMarkers(){if(!layerGroup)return;layerGroup.clearLayers();markers.clear();for(const r of filtered){const m=L.circleMarker([r.lat,r.lng],{radius:7,color:'#fff',weight:2,fillColor:color(r),fillOpacity:.95});m.on('click',()=>select(r));m.bindTooltip(esc(r.name),{direction:'top',offset:[0,-5]});m.addTo(layerGroup);markers.set(r.uid,m)}}
 
-const DRIVE_DOC_INDEX=['drive-links/district-2c.json','drive-links/district-2b-a.json','drive-links/district-2b-b.json'];
+const DRIVE_DOC_INDEX=['drive-links/district-2c.json','drive-links/district-2b-a.json','drive-links/district-2b-b.json',...Array.from({length:6},(_,i)=>`drive-links/rescan-0${i+1}.json`)];
 let driveCabinetDocs=new Map(), driveIndexStatus='Loading documents…';
 function renderCabinetDocuments(r){
   let target=$('cabinetDocumentLinks');
