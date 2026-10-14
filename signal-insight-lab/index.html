@@ -180,47 +180,48 @@ function drawTspEvents(){
  const med=v=>{if(!v.length)return NaN;v.sort((a,b)=>a-b);const i=Math.floor(v.length/2);return v.length%2?v[i]:(v[i-1]+v[i])/2};
  const time=t=>new Date(t*1000).toLocaleTimeString();
  for(const [n,w] of windows.entries()){
-  const idx=refs.findIndex((t,i)=>i<refs.length-1&&t<=w.start&&w.start<refs[i+1]);
-  const ix=idx>=0?idx:refs.findIndex((t,i)=>i<refs.length-1&&t<=w.end&&w.end<refs[i+1]);
-  const notes=[],extension=[],truncation=[],early=[];
-  if(ix<0){notes.push('No bounded reference cycle')}
-  else{
+  const notes=[],extension=[],truncation=[],early=[],detail=[];
+  const affected=[];
+  for(let i=0;i<refs.length-1;i++)if(refs[i]<w.end&&refs[i+1]>w.start)affected.push(i);
+  if(!affected.length)notes.push('No bounded reference cycle intersecting request');
+  for(const ix of affected){
    const begin=refs[ix],finish=refs[ix+1],length=finish-begin;
-   if(length<=0||length>600)notes.push('Invalid reference cycle');
-   else{
-    const candidates=[];
-    for(let i=0;i<refs.length-1;i++){
-     const a=refs[i],b=refs[i+1],len=b-a;
-     if(i===ix||intersects(a,b)||Math.abs(len-length)>Math.max(4,length*.08))continue;
-     candidates.push({a,b,distance:Math.abs(ix-i)});
-    }
-    candidates.sort((a,b)=>a.distance-b.distance);
-    const baseline=candidates.slice(0,8);
-    const phaseValues=(a,b)=>green.filter(g=>g.start>=a-1&&g.start<b&&g.end<=b+15).map(g=>({p:g.p,s:g.start-a,e:g.end-a}));
-    const observed=phaseValues(begin,finish);
-    const reference=baseline.flatMap(v=>phaseValues(v.a,v.b));
-    if(baseline.length<3)notes.push('Fewer than 3 baseline cycles');
-    for(const g of observed){
-     const counterparts=reference.filter(v=>v.p===g.p);
-     if(counterparts.length<3)continue;
-     const ds=g.s-med(counterparts.map(v=>v.s)),de=g.e-med(counterparts.map(v=>v.e));
-     if(de>2&&ds>=-2)extension.push('P'+g.p+' end '+fmt(de)+' later');
-     if(de< -2)truncation.push('P'+g.p+' end '+fmt(-de)+' earlier');
-     if(ds< -2)early.push('P'+g.p+' starts '+fmt(-ds)+' earlier');
-    }
-    notes.push(baseline.length+' comparison cycles; reference P'+ref);
+   if(length<=0||length>600){notes.push('Invalid cycle');continue}
+   const candidate=[];
+   for(let i=0;i<refs.length-1;i++){
+    const a=refs[i],b=refs[i+1];
+    if(affected.includes(i)||intersects(a,b)||Math.abs((b-a)-length)>Math.max(4,length*.08))continue;
+    candidate.push({a,b,distance:Math.abs(ix-i)});
+   }
+   candidate.sort((a,b)=>a.distance-b.distance);
+   const baseline=candidate.slice(0,8);
+   const phaseValues=(a,b)=>green.filter(g=>g.start>=a-1&&g.start<b&&g.end<=b+15).map(g=>({p:g.p,s:g.start-a,e:g.end-a,d:g.duration}));
+   const observed=phaseValues(begin,finish),reference=baseline.flatMap(v=>phaseValues(v.a,v.b));
+   if(baseline.length<3)notes.push('Cycle '+(ix+1)+': weak baseline ('+baseline.length+' reference cycles)');
+   for(const g of observed){
+    const comparisons=reference.filter(v=>v.p===g.p);
+    if(!comparisons.length)continue;
+    const ds=g.s-med(comparisons.map(v=>v.s)),de=g.e-med(comparisons.map(v=>v.e)),
+      dd=g.d-med(comparisons.map(v=>v.d));
+    detail.push('P'+g.p+' start Δ'+fmt(ds)+', end Δ'+fmt(de)+', green Δ'+fmt(dd)+' (n='+comparisons.length+')');
+    if(dd>2)extension.push('P'+g.p+' green +'+fmt(dd));
+    if(dd< -2)truncation.push('P'+g.p+' green '+fmt(dd));
+    if(ds< -2)early.push('P'+g.p+' start '+fmt(ds));
    }
   }
+  notes.unshift(affected.length+' request-overlapping cycles; reference P'+ref);
+  if(detail.length)notes.push(detail.join(' | '));
+  else notes.push('No comparable phase observations; timing effect indeterminate');
   tspCycleExport.push({
    request:time(w.start),priority_phase:'Not verified',
-   green_extension:extension.length?'Possible: '+extension.join('; '):'Not established',
-   truncation:truncation.length?'Possible: '+truncation.join('; '):'Not established',
-   early_green:early.length?'Possible: '+early.join('; '):'Not established',
+   green_extension:extension.length?'Observed longer: '+extension.join('; '):'No >2 s green increase identified',
+   truncation:truncation.length?'Observed shorter: '+truncation.join('; '):'No >2 s green decrease identified',
+   early_green:early.length?'Observed earlier: '+early.join('; '):'No >2 s earlier start identified',
    evidence:notes.join('; ')||'No comparable observations',parameter:w.parameter
   });
  }
  el.innerHTML='<table><tr><th>Request</th><th>Priority phase</th><th>Green extension</th><th>Truncation</th><th>Early green</th><th>Evidence</th></tr>'+
- tspCycleExport.map(r=>'<tr><td>'+esc(r.request)+'</td><td>'+esc(r.priority_phase)+'</td><td>'+esc(r.green_extension)+'</td><td>'+esc(r.truncation)+'</td><td>'+esc(r.early_green)+'</td><td>'+esc(r.evidence)+'</td></tr>').join('')+'</table><p class="hint">“Possible” means a timing difference was observed, not proven TSP service. A priority window can overlap multiple cycles; this screening uses the cycle containing the request start. Check controller PRS history to verify priority phase and service.</p>';
+ tspCycleExport.map(r=>'<tr><td>'+esc(r.request)+'</td><td>'+esc(r.priority_phase)+'</td><td>'+esc(r.green_extension)+'</td><td>'+esc(r.truncation)+'</td><td>'+esc(r.early_green)+'</td><td>'+esc(r.evidence)+'</td></tr>').join('')+'</table><p class="hint">Timing differences are observations, not proof of priority service. All cycles overlapping each candidate request are screened; small reference samples are marked weak. Check PRS history, priority phase and controller timing settings before attributing changes to TSP.</p>';
 }
 $('tspRef').onchange=drawTspEvents;
 $('tspExportCycles').onclick=()=>{
