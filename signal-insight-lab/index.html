@@ -20,7 +20,7 @@ main.wrapper > .row #dataset{font-size:13px}
 <section id="raw" class="card hidden"><div class="row" style="justify-content:space-between"><h2>Event explorer</h2><div class="row"><label for="code">Event code</label><select id="code"><option value="">All codes</option></select><label for="search">Parameter</label><input id="search" type="text" placeholder="Any parameter" style="width:140px"></div></div><div id="rawTable" class="empty">Import data to explore event records.</div></section>
 <section id="timeline" class="card hidden"><div class="row" style="justify-content:space-between"><div><h2>High-resolution event troubleshooting timeline</h2><p class="hint">Reconstructed phase states and detector activations from event transitions. Hover for precise time, zoom with controls, scroll horizontally using previous/next.</p></div><button id="timelinePng">Export timeline PNG</button></div><div class="toolbar"><div class="setting"><label>Window (seconds)</label><select id="windowSec"><option>60</option><option selected>180</option><option>300</option><option>600</option><option>1200</option><option>3600</option></select></div><div class="setting"><label>Start position (%)</label><input id="position" type="range" min="0" max="100" value="0" style="width:260px"></div><div class="setting"><label>Detector channels</label><select id="detShow"><option value="all">First 12 active channels</option><option value="mapped">Mapped channels only</option><option value="none">Hide detectors</option></select></div><button id="prev">← Earlier</button><button id="next">Later →</button><button id="resetTimeline">Reset</button></div><div id="timelineRange" class="hint"></div><canvas id="trace" class="timeline-canvas"></canvas><div id="hoverInfo" class="callout hint">Move over timeline to inspect.</div><div class="hint">Event code assumptions: 0 phase on, 1 begin green, 2 min green, 3 gap out, 4 max out, 5 force off, 7 begin yellow, 8 end green, 9 begin red clearance, 10 end yellow, 11 end red clearance, 12–15 pedestrian events, 81/82 detector state changes. Actual definitions should be validated against your controller firmware dictionary.</div></section>
 <section id="metrics" class="hidden"><article class="card"><h2>Phase Split Monitor — gap / max / force-off</h2><p class="hint">Each point is one observed complete phase-green interval. Color indicates the logged phase termination nearest the end of green. Programmed split is not available from green events alone; this is observed green duration, not true allocated split.</p><div class="row"><label>Phase <select id="splitPhase"></select></label><label>Maximum termination match delay (s) <input id="splitMatch" type="number" min="0" max="15" step="0.5" value="5" style="width:80px"></label><button id="splitCsv">Export phase observations CSV</button></div><canvas id="splitPlot" style="display:block;width:100%;height:330px"></canvas><div class="row" style="gap:12px;flex-wrap:wrap;font-size:12px"><span style="color:#49d6ac">■ Gap-out</span><span style="color:#ff646a">● Max-out</span><span style="color:#ffd24d">◆ Force-off</span><span style="color:#94aaca">○ Unmatched</span></div><div id="splitStats" class="wide-table"></div></article><div class="notice" id="atspmLoadNotice">ATSPM measures are calculated only after uploading controller event data. Detector-specific results additionally require reviewed detector mapping.</div><div class="meters"><div><div class="kicker">Phase terminations</div><div class="flowstat" id="terminationCount">—</div><div class="hint">Gap (4) / max (5) / force-off (6) events</div></div><div><div class="kicker">Detector ON events</div><div class="flowstat" id="detectorCount">—</div><div class="hint">Not equivalent to approach vehicle volume</div></div><div><div class="kicker">Median cycle proxy</div><div class="flowstat" id="cycleProxy">—</div><div class="hint">Spacing of repeated major-phase green starts</div></div></div><div class="diagnostics-grid" style="margin-top:16px"><article class="card"><h2>Phase termination distribution</h2><div id="termTable"></div></article><article class="card"><h2>Pedestrian activity</h2><div id="pedTable"></div></article><article class="card"><h2>Signal event code frequency</h2><div id="eventFrequency"></div></article><article class="card"><h2>Arrival on green — mapped detector proxy</h2><div id="aogTable" class="hint">Assign detector channels to phases in Detector Mapping.</div><p class="hint">Classifies detector ON transitions by the reconstructed associated phase state; NOT a validated stop-bar or advanced-detector arrival-on-green metric. Requires confirmed detector placement and correct event definitions.</p></article><article class="card"><h2>Phase green service summary</h2><div id="greenSummary" class="wide-table"></div><p class="hint">Complete green intervals only; not a measure of actual vehicle utilization.</p></article><article class="card"><h2>Detector actuation and ON-duration summary</h2><div id="pulseSummary" class="wide-table"></div><p class="hint">ON/OFF pairs only. Counts are actuations, not confirmed vehicle volumes; incomplete pairs are reported.</p></article><article class="card"><h2>Pedestrian service sequence checks</h2><div id="pedSummary" class="wide-table"></div><p class="hint">Counts WALK and FDW start events and potential imbalance; not pedestrian demand or pedestrian delay.</p></article><article class="card" style="grid-column:1/-1"><h2>ATSPM measure catalog &amp; prerequisites</h2><p class="hint">Calculated = shown from available events. Proxy = exploratory only. Requires mapping = assign and verify detector-to-phase and placement before using as an ATSPM measure. Not available = required events or field information are missing.</p><div id="atspmCatalog" class="wide-table"></div></article></div></section>
-<section id="tsp" class="hidden"><article class="card"><h2>Transit Signal Priority (TSP) — Event Log Diagnostics</h2><p class="hint">This tab inspects TSP-related controller events without assuming a controller-specific event dictionary. Event codes must be verified for the installed MAXTIME/EOS firmware and TSP interface before request/service statistics can be trusted. Detector-to-phase assignment is not required for a raw event inventory.</p><div class="row"><label>Candidate event-code range <input id="tspMin" type="number" min="0" max="9999" value="112" style="width:88px"></label><label>to <input id="tspMax" type="number" min="0" max="9999" value="121" style="width:88px"></label><button id="tspRefresh">Inspect events</button></div><div id="tspSummary" class="notice">Upload an event log to inspect potentially relevant events.</div><div id="tspCodes" class="wide-table"></div><h3>Per-request TSP cycle analysis</h3><p class="hint">Pairs candidate request start/end (112/119, matched by parameter) and compares phase-green starts/ends against nearby non-priority reference cycles. Reference phase controls cycle alignment. Matched-cycle differences are exploratory; event-code semantics, same timing pattern, and controller Pri Min/Pri Max settings require field verification.</p><div class="row"><label>Reference phase <select id="tspRef"><option value="2">Phase 2</option><option value="6">Phase 6</option><option value="4">Phase 4</option><option value="8">Phase 8</option></select></label><label>Request <select id="tspRequest"></select></label><button id="tspExportCycles">Export comparisons CSV</button></div><div id="tspCycleReport" class="wide-table"></div><canvas id="tspCyclePlot" style="display:block;width:100%;height:315px"></canvas><p class="hint">Timeline: grey = reference no-request cycle green; teal = observed request-cycle green. Relative phase start and end show possible early green, truncation, or extension. Without programmed offsets or a verified priority trace, attribution is not confirmed.</p><h3>Priority-window phase timing comparison (exploratory)</h3><p class="hint">Compares completed phase greens overlapping candidate request windows with greens outside those windows. Positive differences indicate longer observed green; negative differences indicate shorter green. This does NOT establish Pri Min/Pri Max configuration, early green, or TSP causation. Confirm 112/119 meanings for MAXTIME firmware.</p><div id="tspTiming" class="wide-table"></div><h3>Coordination events (not TSP)</h3><p class="hint">Code 150: coordination cycle reference events (including local/master zero by parameter). Code 152: coordinated phase timing events. Confirm exact parameter definitions against your controller firmware. These events are excluded from TSP request counts.</p><div id="coordTspCodes" class="wide-table"></div><h3>TSP performance measures and required data</h3><div class="wide-table"><table><tr><th>Measure</th><th>What is needed</th><th>Detector assignment?</th></tr><tr><td>Requests received / cancelled</td><td>Verified request-on / request-off event codes and request identifier</td><td>No</td></tr><tr><td>Requests served / denied</td><td>Verified priority activation / decision codes linked to requests</td><td>No</td></tr><tr><td>Request-to-service response time</td><td>Matched request and service timestamps</td><td>No</td></tr><tr><td>Priority duration</td><td>Verified begin/end priority events</td><td>No</td></tr><tr><td>Green extension or early green</td><td>Verified priority phase, controller strategy, and baseline timing</td><td>Verified phase association required</td></tr><tr><td>Impacts on conflicting phases / recovery</td><td>Priority windows, phase events, and representative comparison cycles</td><td>Verified phase association required</td></tr></table></div><p class="hint">A code appearing in the selected range does not establish that it is TSP. Counts shown below are a raw inventory only, not confirmed TSP requests or grants.</p></article></section>
+<section id="tsp" class="hidden"><article class="card"><h2>Transit Signal Priority (TSP) — Event Log Diagnostics</h2><p class="hint">This tab inspects TSP-related controller events without assuming a controller-specific event dictionary. Event codes must be verified for the installed MAXTIME/EOS firmware and TSP interface before request/service statistics can be trusted. Detector-to-phase assignment is not required for a raw event inventory.</p><div class="row"><label>Candidate event-code range <input id="tspMin" type="number" min="0" max="9999" value="112" style="width:88px"></label><label>to <input id="tspMax" type="number" min="0" max="9999" value="121" style="width:88px"></label><button id="tspRefresh">Inspect events</button></div><div id="tspSummary" class="notice">Upload an event log to inspect potentially relevant events.</div><div id="tspCodes" class="wide-table"></div><h3>TSP Event-by-Event Analysis</h3><p class="hint">One row per paired candidate request (event 112 to 119 with matching parameter). The table screens for phase-timing changes relative to nearby non-request greens. Priority phase and controller Pri Min/Pri Max actions cannot be verified without PRS phase details, the timing plan, and confirmed event definitions.</p><div class="row"><label>Reference phase for cycle comparison <select id="tspRef"><option value="2">Phase 2</option><option value="6">Phase 6</option><option value="4">Phase 4</option><option value="8">Phase 8</option></select></label><button id="tspExportCycles">Export request analysis CSV</button></div><div id="tspEventTable" class="wide-table"></div><h3>Coordination events (not TSP)</h3><p class="hint">Code 150: coordination cycle reference events (including local/master zero by parameter). Code 152: coordinated phase timing events. Confirm exact parameter definitions against your controller firmware. These events are excluded from TSP request counts.</p><div id="coordTspCodes" class="wide-table"></div><h3>TSP performance measures and required data</h3><div class="wide-table"><table><tr><th>Measure</th><th>What is needed</th><th>Detector assignment?</th></tr><tr><td>Requests received / cancelled</td><td>Verified request-on / request-off event codes and request identifier</td><td>No</td></tr><tr><td>Requests served / denied</td><td>Verified priority activation / decision codes linked to requests</td><td>No</td></tr><tr><td>Request-to-service response time</td><td>Matched request and service timestamps</td><td>No</td></tr><tr><td>Priority duration</td><td>Verified begin/end priority events</td><td>No</td></tr><tr><td>Green extension or early green</td><td>Verified priority phase, controller strategy, and baseline timing</td><td>Verified phase association required</td></tr><tr><td>Impacts on conflicting phases / recovery</td><td>Priority windows, phase events, and representative comparison cycles</td><td>Verified phase association required</td></tr></table></div><p class="hint">A code appearing in the selected range does not establish that it is TSP. Counts shown below are a raw inventory only, not confirmed TSP requests or grants.</p></article></section>
 <section id="mapping" class="card hidden"><h2>Detector-to-phase mapping and ATSPM prerequisites <span style="font-size:12px;color:#49d6ac">Browser phase + role suggestions</span></h2><p class="hint">Set each channel's associated phase and field detector role. Mapping stays in this browser session; export configuration JSON to save it. Zero means unassigned.</p><div class="toolbar"><label>Channel <input id="manualChannel" type="number" min="1" max="9999" style="width:105px" placeholder="Number"></label><button id="manualAdd">+ Add channel</button><button id="autoMap">Recalculate phase suggestions</button><button id="saveMap" class="primary">Export detector mapping JSON</button><label class="filebutton" for="mapImport">Import mapping JSON</label><input id="mapImport" type="file" accept=".json,application/json"></div><div id="mappingSummary"></div><div id="mapGrid" class="wide-table"></div><div class="notice">Approach volumes, split failures, red-light running, and arrivals-on-green require site-specific detector placement, channel function, phase association, and complete event capture. A phase association alone is not sufficient for validated ATSPM metrics.</div></section>
 <section id="comparefiles" class="card hidden"><h2>Before / after comparison</h2><p class="hint">Current dataset = After. Import a second CSV/JSON/.db as Before. Compare observed event characteristics, not causal effects or vehicle delay.</p><div class="row"><label class="filebutton" for="beforeUpload">Upload baseline dataset</label><input id="beforeUpload" type="file" accept=".db,.sqlite,.sqlite3,.csv,.json"><button id="clearBefore">Clear baseline</button></div><div id="baselineStatus" class="callout hint">No baseline loaded.</div><div id="compareOutput"></div></section>
 <section id="guide" class="card hidden"><h2>What this tool measures—and what it cannot yet measure</h2><div class="diagnostics-grid"><div class="callout"><h3>Available from event logs</h3><p class="hint">Observed phase green service intervals; frequency of gap-out, max-out and force-off codes; pedestrian event-code counts; detector ON/OFF actuation counts; event timeline; incomplete pair and data-quality screens.</p></div><div class="callout"><h3>Needs validated configuration</h3><p class="hint">Phase assignments, detector roles, direction, stop bar vs advanced detector, overlap configuration, permissive FYA logic, coordinated phases, cycle reference point, split settings, controller model/firmware, event code dictionary.</p></div><div class="callout"><h3>Needs more inputs or modeling</h3><p class="hint">HCM delay, queue length, capacity, true split failure, red-light violation inference, reliable approach volumes, arrivals on green, offset optimization, multimodal travel time, preemption and TSP response quality.</p></div><div class="callout"><h3>Privacy and security</h3><p class="hint">Uploads are analyzed inside your browser. SQLite parsing uses sql.js downloaded from a CDN. Do not commit operational controller logs, passwords, or nonpublic intersection configuration to a publicly accessible GitHub repository.</p></div></div></section>
@@ -164,90 +164,69 @@ function drawSplitMonitor(){
 
 
 let tspCycleExport=[];
-function drawTspCycle(){
- const report=$('tspCycleReport'),picker=$('tspRequest'),ref=Number($('tspRef').value),plot=$('tspCyclePlot');
- const starts=data.filter(e=>e.code===112).sort((a,b)=>a.t-b.t),ends=data.filter(e=>e.code===119).sort((a,b)=>a.t-b.t),used=new Set(),requests=[];
- for(const a of starts){const i=ends.findIndex((b,j)=>!used.has(j)&&b.param===a.param&&b.t>=a.t&&b.t-a.t<=600);if(i>=0){used.add(i);requests.push({start:a.t,end:ends[i].t,parameter:a.param})}}
- const selected=Number(picker.value||0);picker.innerHTML=requests.map((w,i)=>'<option value="'+i+'">'+new Date(w.start*1000).toLocaleTimeString()+' · parameter '+w.parameter+'</option>').join('');picker.value=String(Math.min(selected,Math.max(0,requests.length-1)));
- const ctx=plot.getContext('2d'),width=Math.max(plot.clientWidth,450),height=315,dpr=window.devicePixelRatio||1;plot.width=width*dpr;plot.height=height*dpr;ctx.scale(dpr,dpr);ctx.fillStyle='#101b2d';ctx.fillRect(0,0,width,height);
- tspCycleExport=[];
- if(!requests.length){report.innerHTML='<p class="hint">No paired 112/119 candidate requests. Confirm the MAXTIME event-code dictionary.</p>';return}
- const w=requests[Number(picker.value)],allGreens=phaseService(data);
- const refs=allGreens.filter(g=>g.p===ref).map(g=>g.start).sort((a,b)=>a-b);
- const cycleIndex=refs.findIndex((t,i)=>i<refs.length-1&&t<=w.start&&w.start<refs[i+1]);
- const index=cycleIndex>=0?cycleIndex:refs.findIndex((t,i)=>i<refs.length-1&&t<=w.end&&w.end<refs[i+1]);
- if(index<0){report.textContent='No bounded reference cycle at request time; choose another reference phase.';return}
- const start=refs[index],stop=refs[index+1],length=stop-start;
- if(length<30||length>600){report.textContent='Reference cycle length outside usable range.';return}
- const containsRequest=(a,b)=>requests.some(q=>a<q.end&&b>q.start);
- const baseline=[];
- for(let i=0;i<refs.length-1;i++){
-  const a=refs[i],b=refs[i+1],len=b-a;
-  if(Math.abs(len-length)>Math.max(4,length*.08)||containsRequest(a,b)||i===index)continue;
-  const separation=Math.min(Math.abs(i-index),10000);
-  baseline.push({start:a,end:b,length:len,separation});
- }
- baseline.sort((a,b)=>a.separation-b.separation);
- const comparison=baseline.slice(0,8);
- const cyclePhases=(a,b)=>allGreens.filter(g=>g.start>=a-1&&g.start<b).map(g=>({p:g.p,start:g.start-a,end:g.end-a,complete:g.end<=b+15}));
- const target=cyclePhases(start,stop),reference=[];
- for(const x of comparison)reference.push(...cyclePhases(x.start,x.end).filter(g=>g.complete));
- const phases=[...new Set(target.map(g=>g.p))].sort((a,b)=>a-b);
- const medianValue=v=>{if(!v.length)return NaN;const a=v.slice().sort((x,y)=>x-y);return a.length%2?a[(a.length-1)/2]:(a[a.length/2-1]+a[a.length/2])/2};
- const rows=phases.map(p=>{
-  const current=target.find(x=>x.p===p),past=reference.filter(x=>x.p===p);
-  const baseStart=medianValue(past.map(x=>x.start)),baseEnd=medianValue(past.map(x=>x.end));
-  const startDelta=current&&Number.isFinite(baseStart)?current.start-baseStart:NaN;
-  const endDelta=current&&Number.isFinite(baseEnd)?current.end-baseEnd:NaN;
-  let label='Insufficient matched baseline';
-  if(Number.isFinite(startDelta)&&Number.isFinite(endDelta))label=endDelta>2&&startDelta>-2?'Later green end (extension candidate)':endDelta< -2?'Earlier green end (truncation candidate)':startDelta< -2?'Earlier green start candidate':'Near baseline';
-  return {request:new Date(w.start*1000).toISOString(),parameter:w.parameter,phase:p,observed_start:current?.start,observed_end:current?.end,baseline_start:baseStart,baseline_end:baseEnd,start_delta:startDelta,end_delta:endDelta,interpretation:label};
- });
- tspCycleExport=rows;
- const fmt=n=>Number.isFinite(n)?n.toFixed(1):'—';
- report.innerHTML='<p class="hint">Candidate request '+new Date(w.start*1000).toLocaleTimeString()+'–'+new Date(w.end*1000).toLocaleTimeString()+' · reference Phase '+ref+' · cycle '+length.toFixed(1)+' s · '+comparison.length+' nearby non-request reference cycles (±8% duration). Reference cycles may still differ by coordination pattern or demand.</p><table><tr><th>Phase</th><th>Green start (s)</th><th>Baseline start (s)</th><th>Start Δ (s)</th><th>Green end (s)</th><th>Baseline end (s)</th><th>End Δ (s)</th><th>Screening interpretation</th></tr>'+rows.map(r=>'<tr><td>'+r.phase+'</td><td>'+fmt(r.observed_start)+'</td><td>'+fmt(r.baseline_start)+'</td><td>'+fmt(r.start_delta)+'</td><td>'+fmt(r.observed_end)+'</td><td>'+fmt(r.baseline_end)+'</td><td>'+fmt(r.end_delta)+'</td><td>'+r.interpretation+'</td></tr>').join('')+'</table>';
- const L=65,R=25,T=30,B=35,H=height-T-B,plotWidth=width-L-R,x=t=>L+Math.max(0,Math.min(length+15,t))/(length+15)*plotWidth;
- ctx.font='12px Segoe UI';ctx.strokeStyle='#34455c';
- for(let i=0;i<=5;i++){const t=(length+15)*i/5;ctx.beginPath();ctx.moveTo(x(t),T);ctx.lineTo(x(t),height-B);ctx.stroke();ctx.fillStyle='#a9bad1';ctx.fillText(t.toFixed(0)+'s',x(t)-10,height-13)}
- for(let i=0;i<rows.length;i++){
-  const r=rows[i],y=T+18+i*Math.min(36,H/Math.max(1,rows.length));
-  ctx.fillStyle='#d8e4f2';ctx.fillText('P'+r.phase,12,y+5);
-  if(Number.isFinite(r.baseline_start)&&Number.isFinite(r.baseline_end)){ctx.fillStyle='#64748b';ctx.fillRect(x(r.baseline_start),y-10,Math.max(1,x(r.baseline_end)-x(r.baseline_start)),8)}
-  if(Number.isFinite(r.observed_start)&&Number.isFinite(r.observed_end)){ctx.fillStyle='#20bea0';ctx.fillRect(x(r.observed_start),y+2,Math.max(1,x(r.observed_end)-x(r.observed_start)),8)}
- }
-}
-$('tspRef').onchange=drawTspCycle;$('tspRequest').onchange=drawTspCycle;
-$('tspExportCycles').onclick=()=>{const headers=['request','parameter','phase','observed_start','observed_end','baseline_start','baseline_end','start_delta','end_delta','interpretation'];saveFile('tsp_request_cycle_comparison.csv',headers.join(',')+'\n'+tspCycleExport.map(r=>headers.map(k=>JSON.stringify(r[k]??'')).join(',')).join('\n'),'text/csv')};
-function drawTspTiming(){
- const output=$('tspTiming');
- if(!data.length){output.textContent='Upload an event log to compare timing.';return}
- const begins=data.filter(e=>e.code===112).sort((a,b)=>a.t-b.t);
- const ends=data.filter(e=>e.code===119).sort((a,b)=>a.t-b.t);
+function drawTspEvents(){
+ const el=$('tspEventTable'),ref=Number($('tspRef').value);
+ const starts=data.filter(e=>e.code===112).sort((a,b)=>a.t-b.t),ends=data.filter(e=>e.code===119).sort((a,b)=>a.t-b.t);
  const windows=[],used=new Set();
- for(const b of begins){
-  const idx=ends.findIndex((x,i)=>!used.has(i)&&x.param===b.param&&x.t>=b.t&&x.t-b.t<=600);
-  if(idx>=0){used.add(idx);windows.push({start:b.t,end:ends[idx].t,parameter:b.param})}
+ for(const a of starts){
+  const i=ends.findIndex((b,j)=>!used.has(j)&&b.param===a.param&&b.t>=a.t&&b.t-a.t<=600);
+  if(i>=0){used.add(i);windows.push({start:a.t,end:ends[i].t,parameter:a.param})}
  }
- if(!windows.length){output.innerHTML='<p class="hint">No paired candidate 112→119 windows found. Check event-code definitions before assuming no TSP occurred.</p>';return}
- const greens=phaseService(data);
- const groups=new Map();
- for(const g of greens){
-  if(!groups.has(g.p))groups.set(g.p,{during:[],outside:[]});
-  const target=windows.some(w=>g.start<w.end&&g.end>w.start)?'during':'outside';
-  groups.get(g.p)[target].push(g.duration);
+ tspCycleExport=[];
+ if(!windows.length){el.innerHTML='<p class="hint">No paired candidate priority request events (112→119). No TSP actions can be inferred from this event log.</p>';return}
+ const green=phaseService(data),refs=green.filter(g=>g.p===ref).map(g=>g.start).sort((a,b)=>a-b);
+ const intersects=(a,b)=>windows.some(w=>a<w.end&&b>w.start);
+ const fmt=x=>Number.isFinite(x)?x.toFixed(1)+' s':'—';
+ const med=v=>{if(!v.length)return NaN;v.sort((a,b)=>a-b);const i=Math.floor(v.length/2);return v.length%2?v[i]:(v[i-1]+v[i])/2};
+ const time=t=>new Date(t*1000).toLocaleTimeString();
+ for(const [n,w] of windows.entries()){
+  const idx=refs.findIndex((t,i)=>i<refs.length-1&&t<=w.start&&w.start<refs[i+1]);
+  const ix=idx>=0?idx:refs.findIndex((t,i)=>i<refs.length-1&&t<=w.end&&w.end<refs[i+1]);
+  const notes=[],extension=[],truncation=[],early=[];
+  if(ix<0){notes.push('No bounded reference cycle')}
+  else{
+   const begin=refs[ix],finish=refs[ix+1],length=finish-begin;
+   if(length<=0||length>600)notes.push('Invalid reference cycle');
+   else{
+    const candidates=[];
+    for(let i=0;i<refs.length-1;i++){
+     const a=refs[i],b=refs[i+1],len=b-a;
+     if(i===ix||intersects(a,b)||Math.abs(len-length)>Math.max(4,length*.08))continue;
+     candidates.push({a,b,distance:Math.abs(ix-i)});
+    }
+    candidates.sort((a,b)=>a.distance-b.distance);
+    const baseline=candidates.slice(0,8);
+    const phaseValues=(a,b)=>green.filter(g=>g.start>=a-1&&g.start<b&&g.end<=b+15).map(g=>({p:g.p,s:g.start-a,e:g.end-a}));
+    const observed=phaseValues(begin,finish);
+    const reference=baseline.flatMap(v=>phaseValues(v.a,v.b));
+    if(baseline.length<3)notes.push('Fewer than 3 baseline cycles');
+    for(const g of observed){
+     const counterparts=reference.filter(v=>v.p===g.p);
+     if(counterparts.length<3)continue;
+     const ds=g.s-med(counterparts.map(v=>v.s)),de=g.e-med(counterparts.map(v=>v.e));
+     if(de>2&&ds>=-2)extension.push('P'+g.p+' end '+fmt(de)+' later');
+     if(de< -2)truncation.push('P'+g.p+' end '+fmt(-de)+' earlier');
+     if(ds< -2)early.push('P'+g.p+' starts '+fmt(-ds)+' earlier');
+    }
+    notes.push(baseline.length+' comparison cycles; reference P'+ref);
+   }
+  }
+  tspCycleExport.push({
+   request:time(w.start),priority_phase:'Not verified',
+   green_extension:extension.length?'Possible: '+extension.join('; '):'Not established',
+   truncation:truncation.length?'Possible: '+truncation.join('; '):'Not established',
+   early_green:early.length?'Possible: '+early.join('; '):'Not established',
+   evidence:notes.join('; ')||'No comparable observations',parameter:w.parameter
+  });
  }
- const avg=arr=>arr.reduce((s,x)=>s+x,0)/arr.length;
- const label=x=>new Date(x*1000).toLocaleTimeString();
- output.innerHTML='<p class="hint">'+windows.length+' paired candidate request window(s): '+windows.slice(0,8).map(w=>label(w.start)+'–'+label(w.end)+' (parameter '+w.parameter+')').join('; ')+(windows.length>8?' …':'')+'. These event pairs are provisional until confirmed with the controller dictionary.</p>'+
- '<table><tr><th>Phase</th><th>During-window greens</th><th>Mean during (s)</th><th>Outside greens</th><th>Mean outside (s)</th><th>Difference (s)</th><th>Interpretation</th></tr>'+
- [...groups].sort((a,b)=>a[0]-b[0]).map(([p,x])=>{
- const enough=x.during.length&&x.outside.length>=2;
- const d=enough?avg(x.during)-avg(x.outside):NaN;
- const interpretation=!enough?'Insufficient comparison':d>1?'Longer observed green':d< -1?'Shorter observed green':'Similar observed green';
- const fmt=x=>Number.isFinite(x)?x.toFixed(1):'—';
- return '<tr><td>'+p+'</td><td>'+x.during.length+'</td><td>'+fmt(x.during.length?avg(x.during):NaN)+'</td><td>'+x.outside.length+'</td><td>'+fmt(x.outside.length?avg(x.outside):NaN)+'</td><td>'+fmt(d)+'</td><td>'+interpretation+'</td></tr>';
- }).join('')+'</table><p class="hint">Not a matched-cycle counterfactual: traffic demand, coordination transitions, and cycle position may explain differences. Pri Min and Pri Max are controller settings and cannot be read from these logs alone.</p>';
+ el.innerHTML='<table><tr><th>Request</th><th>Priority phase</th><th>Green extension</th><th>Truncation</th><th>Early green</th><th>Evidence</th></tr>'+
+ tspCycleExport.map(r=>'<tr><td>'+esc(r.request)+'</td><td>'+esc(r.priority_phase)+'</td><td>'+esc(r.green_extension)+'</td><td>'+esc(r.truncation)+'</td><td>'+esc(r.early_green)+'</td><td>'+esc(r.evidence)+'</td></tr>').join('')+'</table><p class="hint">“Possible” means a timing difference was observed, not proven TSP service. A priority window can overlap multiple cycles; this screening uses the cycle containing the request start. Check controller PRS history to verify priority phase and service.</p>';
 }
+$('tspRef').onchange=drawTspEvents;
+$('tspExportCycles').onclick=()=>{
+ const cols=['request','parameter','priority_phase','green_extension','truncation','early_green','evidence'];
+ saveFile('tsp_event_by_event.csv',cols.join(',')+'\n'+tspCycleExport.map(r=>cols.map(k=>JSON.stringify(r[k]??'')).join(',')).join('\n'),'text/csv');
+};
 function drawTsp(){
  const summary=$('tspSummary'),out=$('tspCodes'),coord=$('coordTspCodes');
  if(!data.length){summary.textContent='No data loaded. Upload controller event log first.';out.textContent='';coord.textContent='';return}
@@ -260,7 +239,7 @@ function drawTsp(){
  const total=[...candidate.values()].reduce((s,v)=>s+v.n,0);
  summary.textContent=data.length.toLocaleString()+' records loaded. '+total+' candidate events in range '+lower+'–'+upper+', excluding coordination codes 150/152. This is NOT a confirmed TSP request or service count.';
  out.innerHTML=table(candidate,false);coord.innerHTML=table(coordination,true);
- drawTspTiming();drawTspCycle();
+ drawTspEvents();
 }
 $('tspRefresh').onclick=drawTsp;
 function drawAtspmCatalog(){
