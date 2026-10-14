@@ -133,72 +133,94 @@ let service=phaseService(data),aog=[];for(let [ch,m] of Object.entries(mapping))
  * Heuristic evidence is descriptive and not calibrated model probability.
  * Never replace a manually edited or imported trained-model mapping.
  */
+/* Independent ATSPM screening: interpretable engineering features, not trained probabilities. */
 function browserSuggestMappings(force=false){
  if(!data.length)return;
- const greens=phaseService(data),phases=[...new Set(greens.map(g=>g.p))].sort((a,b)=>a-b);
- const start=data[0].t,end=data.at(-1).t,minutes=(end-start)/60;
+ const iv=phaseService(data),phases=[...new Set(iv.map(g=>g.p))],begin=data[0].t,end=data.at(-1).t,span=end-begin;
+ const byPhase=new Map(phases.map(p=>[p,iv.filter(g=>g.p===p)]));
  const byCh=new Map();
  for(const e of data)if(e.code===81||e.code===82){
-   if(!byCh.has(e.param))byCh.set(e.param,[]);
-   byCh.get(e.param).push(e);
+  if(!byCh.has(e.param))byCh.set(e.param,[]);
+  byCh.get(e.param).push(e);
  }
+ const channelStats=new Map();
  for(const [ch,events] of byCh){
-   const old=mapping[ch];
-   if(old&&old.model?.source!=='browser-heuristic')continue;
-   if(old?.manualEdited)continue;
-   if(old&&!force&&old.model?.source==='browser-heuristic')continue;
-   const ons=events.filter(e=>e.code===81).map(e=>e.t),durations=[];
-   let active=null,unmatched=0;
-   for(const e of events){
-     if(e.code===81){if(active!==null)unmatched++;active=e.t}
-     else if(active===null)unmatched++;else{if(e.t>=active)durations.push({start:active,end:e.t,len:e.t-active});active=null}
+  const ons=events.filter(e=>e.code===81).map(e=>e.t),pulses=[];
+  let active=null,unmatched=0;
+  for(const e of events){
+   if(e.code===81){if(active!==null)unmatched++;active=e.t}
+   else if(active===null)unmatched++;
+   else{if(e.t>=active)pulses.push({start:active,end:e.t,len:e.t-active});active=null}
+  }
+  if(active!==null)unmatched++;
+  channelStats.set(ch,{ons,pulses,unmatched,events:events.length});
+ }
+ const overlap=(d,intervals)=>intervals.reduce((s,g)=>s+Math.max(0,Math.min(d.end,g.end)-Math.max(d.start,g.start)),0);
+ const ranked=new Map();
+ for(const [ch,s] of channelStats){
+  const scores=phases.map(p=>{
+   const gs=byPhase.get(p),greenSec=gs.reduce((acc,g)=>acc+g.duration,0);
+   let greenHits=0,nearStart=0,preGreen=0,coveredCycles=0;
+   for(const g of gs){
+    const hits=s.ons.filter(t=>t>=g.start&&t<g.end);
+    greenHits+=hits.length;
+    if(hits.length)coveredCycles++;
+    nearStart+=s.ons.filter(t=>t>=g.start&&t<Math.min(g.end,g.start+8)).length;
+    preGreen+=s.ons.filter(t=>t>=g.start-12&&t<g.start).length;
    }
-   const scores=phases.map(p=>{
-     const intervals=greens.filter(g=>g.p===p);
-     const seconds=intervals.reduce((s,g)=>s+g.duration,0);
-     const hits=ons.filter(t=>intervals.some(g=>t>=g.start&&t<g.end)).length;
-     const share=ons.length?hits/ons.length:0,baseline=(end>start)?seconds/(end-start):0;
-     return {p,hits,share,baseline,lift:share-baseline};
-   }).sort((x,y)=>y.lift-x.lift);
-   const first=scores[0],second=scores[1];
-   const supported=!!first&&minutes>=20&&ons.length>=10&&first.hits>=6&&first.lift>=.16&&first.lift-(second?.lift??0)>=.08;
-   const medianDur=durations.length?median(durations.map(x=>x.len)):NaN;
-   const longFraction=durations.length?durations.filter(x=>x.len>=3).length/durations.length:0;
-   let greenOcc=0,redOcc=0,greenSeconds=0,redSeconds=0;
-   if(first){
-     const ints=greens.filter(g=>g.p===first.p);
-     greenSeconds=ints.reduce((s,g)=>s+g.duration,0);
-     redSeconds=Math.max(0,(end-start)-greenSeconds);
-     for(const d of durations){
-       let overlap=0;
-       for(const g of ints)overlap+=Math.max(0,Math.min(g.end,d.end)-Math.max(g.start,d.start));
-       greenOcc+=overlap;redOcc+=Math.max(0,d.len-overlap);
-     }
-   }
-   const go=greenSeconds?greenOcc/greenSeconds:0,ro=redSeconds?redOcc/redSeconds:0;
-   // Conservative screening categories, not a detector placement measurement.
-   let fn='unknown',explanation='Actuation timing insufficient to distinguish detector type';
-   if(supported&&durations.length>=8&&unmatched<=events.length*.1){
-     if(medianDur>=2.0&&ro>=.08){fn='stop-bar';explanation='Long ON durations and red occupancy suggest presence detection'}
-     else if(medianDur<=.7&&longFraction<.08&&ons.length>=25){fn='count';explanation='Very short pulse-like actuations suggest a count detector; advance pulse detection remains possible'}
-     else if(medianDur<2&&first.share>=.65&&ro<.07&&ons.length>=20){fn='advance';explanation='Short, green-associated actuations with little red occupancy suggest advance detection'}
-   }
-   // Do not assign ambiguous function automatically: retain proposal for user review.
-   mapping[ch]={phase:supported?first.p:0,role:'unknown',notes:old?.notes||'',
-     model:{source:'browser-heuristic',review:true,phaseProb:first?.share??NaN,functionProb:NaN,
-       candidatePhase:first?.p||0,function:fn,functionEvidence:explanation,
-       status:supported?'Screening only — needs review':'Insufficient or ambiguous phase evidence',
-       sampleCount:ons.length,pairedPulses:durations.length,medianOn:medianDur,
-       redOccupancy:ro,greenOccupancy:go,greenLift:first?.lift??NaN}};
+   // Cap to prevent overlapping start windows on atypical phase traces.
+   const base=span>0?greenSec/span:0;
+   const share=s.ons.length?greenHits/s.ons.length:0;
+   const lift=share-base;
+   const coverage=gs.length?coveredCycles/gs.length:0;
+   const startRate=s.ons.length?Math.min(1,nearStart/s.ons.length):0;
+   const leadRate=s.ons.length?Math.min(1,preGreen/s.ons.length):0;
+   const pulseSeconds=s.pulses.reduce((total,x)=>total+x.len,0);
+   const greenOcc=pulseSeconds?s.pulses.reduce((total,x)=>total+overlap(x,gs),0)/pulseSeconds:0;
+   // Multiple independent signals are intentionally weighted conservatively.
+   const score=.53*lift+.17*coverage+.13*startRate+.09*leadRate+.08*greenOcc;
+   return {p,score,share,lift,coverage,startRate,leadRate,greenOcc,greenHits,greenSec,cycles:gs.length};
+  }).sort((x,y)=>y.score-x.score);
+  ranked.set(ch,scores);
+ }
+ for(const [ch,s] of channelStats){
+  const old=mapping[ch];
+  if(old?.manualEdited||(old&&!force&&old.model?.source==='browser-heuristic'))continue;
+  if(old&&old.model?.source!=='browser-heuristic')continue;
+  const scores=ranked.get(ch),best=scores[0],second=scores[1];
+  // Neighbor evidence only supports the candidate; it never independently determines the phase.
+  const neighbors=[...ranked.entries()].filter(([other,rank])=>other!==ch&&rank[0]?.p===best?.p&&rank[0]?.score>=.24).length;
+  const advantage=best?best.score-(second?.score??0):0;
+  const adequate=!!best&&span>=1200&&s.ons.length>=10&&best.greenHits>=6&&best.lift>=.12&&best.score>=.23&&advantage>=.07&&best.cycles>=4;
+  const medianOn=s.pulses.length?median(s.pulses.map(x=>x.len)):NaN;
+  const longRate=s.pulses.length?s.pulses.filter(x=>x.len>=3).length/s.pulses.length:0;
+  const gs=best?byPhase.get(best.p):[],redSec=best?Math.max(0,span-best.greenSec):0;
+  const greenOccupied=s.pulses.reduce((v,d)=>v+overlap(d,gs),0);
+  const totalOccupied=s.pulses.reduce((v,d)=>v+d.len,0);
+  const redOccupancy=redSec?Math.max(0,totalOccupied-greenOccupied)/redSec:0;
+  let functionGuess='unknown',why='Insufficient evidence to distinguish detector function';
+  const goodPulses=s.pulses.length>=8&&s.unmatched<=s.events*.1;
+  if(adequate&&goodPulses){
+   if(medianOn>=2&&redOccupancy>=.08&&longRate>=.3){functionGuess='stop-bar';why='Long actuations and substantial red occupancy suggest presence detection'}
+   else if(medianOn<=.7&&longRate<.08&&s.ons.length>=30){functionGuess='count';why='Mostly brief pulses: count-like, but advance pulse mode remains possible'}
+   else if(medianOn<2&&best.share>=.65&&redOccupancy<.07&&s.ons.length>=20){functionGuess='advance';why='Short actuation pulses associated with green; location cannot be established from events alone'}
+  }
+  mapping[ch]={phase:adequate?best.p:0,role:'unknown',notes:old?.notes||'',
+   model:{source:'browser-heuristic',review:true,candidatePhase:adequate?best.p:0,rawPhaseCandidate:best?.p||0,
+    function:functionGuess,functionEvidence:why,status:adequate?'Multi-feature suggestion; field review required':'Weak or ambiguous phase association',
+    phaseProb:NaN,functionProb:NaN,sampleCount:s.ons.length,pairedPulses:s.pulses.length,medianOn,
+    greenShare:best?.share??0,greenLift:best?.lift??0,cycleCoverage:best?.coverage??0,
+    startRate:best?.startRate??0,leadRate:best?.leadRate??0,neighbors,score:best?.score??0,
+    separation:advantage,redOccupancy,greenOccupancy:best?.greenOcc??0,unmatched:s.unmatched}};
  }
 }
 function drawMapping(){
  const detected=[...new Set(data.filter(e=>e.code===81||e.code===82).map(e=>e.param))];
  const ids=[...new Set([...detected,...Object.keys(mapping).map(Number).filter(Number.isFinite)])].sort((a,b)=>a-b);
- $('mappingSummary').innerHTML='<p class="hint">'+detected.length+' channels observed in event log; '+ids.length+' available for mapping. Predicted phase and role appear beside editable assignments. These rule-based estimates are not calibrated or validated. Select Apply only after checking the evidence.</p>';
+ $('mappingSummary').innerHTML='<p class="hint">'+detected.length+' channels observed in event log; '+ids.length+' available for mapping. Independent multi-feature screening now checks phase green overlap, green-start activity, calls before green, cycle coverage, and corroborating channels. No machine-learning model or calibrated confidence; review before applying.</p>';
  $('mapGrid').innerHTML=ids.length?'<table><tr><th>Detector</th><th>Phase</th><th>Role</th><th>Predicted phase</th><th>Predicted role</th><th>Evidence</th><th>Action</th><th>Approach / notes</th></tr>'+ids.slice(0,300).map(ch=>{
  const m=mapping[ch]||{phase:0,role:'unknown',notes:''},confidence=m.model?(m.model.source==='browser-heuristic'?('Phase '+(m.model.candidatePhase||'—')+' · '+Math.round((m.model.phaseProb||0)*100)+'% green ON · function suggestion: '+(m.model.function||'unknown')+' · median ON '+(Number.isFinite(m.model.medianOn)?m.model.medianOn.toFixed(1)+'s':'—')):([m.model.phaseProb,m.model.functionProb].map(v=>Number.isFinite(v)?Math.round(v*100)+'%':'—').join(' / '))):'Manual';
- const role=String(m.role||'unknown'),predPhase=m.model?.candidatePhase||0,predRole=String(m.model?.function||'unknown'), evidence=m.model?.source==='browser-heuristic'?('Green ON '+Math.round((m.model.phaseProb||0)*100)+'% · median ON '+(Number.isFinite(m.model.medianOn)?m.model.medianOn.toFixed(1)+'s':'—')+' · review required'):(m.model?confidence:'Manual');
+ const role=String(m.role||'unknown'),predPhase=m.model?.candidatePhase||0,predRole=String(m.model?.function||'unknown'), evidence=m.model?.source==='browser-heuristic'?('Green lift '+Math.round((m.model.greenLift||0)*100)+'pt · cycles '+Math.round((m.model.cycleCoverage||0)*100)+'% · pre-green '+Math.round((m.model.leadRate||0)*100)+'% · median ON '+(Number.isFinite(m.model.medianOn)?m.model.medianOn.toFixed(1)+'s':'—')+' · review'):(m.model?confidence:'Manual');
  return '<tr><td>'+ch+'</td><td><select data-map-phase="'+ch+'"><option value="0">Unassigned</option>'+Array.from({length:16},(_,i)=>'<option value="'+(i+1)+'" '+(+m.phase===i+1?'selected':'')+'>'+(i+1)+'</option>').join('')+'</select></td><td><select data-map-role="'+ch+'">'+['unknown','stop-bar','advance','count','yellow_red','mid','queue','pedestrian','bike','other'].map(v=>'<option value="'+v+'" '+(role===v?'selected':'')+'>'+v+'</option>').join('')+'</select></td><td>'+esc(predPhase?'Phase '+predPhase:'Uncertain')+'</td><td>'+esc(predRole)+'</td><td>'+esc(evidence)+'</td><td><button type="button" data-apply="'+ch+'" '+(!predPhase&&predRole==='unknown'?'disabled':'')+'>Apply</button></td><td><input data-map-notes="'+ch+'" value="'+esc(m.notes||'')+'" placeholder="EB through, location..."></td></tr>'
  }).join('')+'</table>':'<div class="empty">Upload a .db file or manually add a detector channel.</div>';
  for(const btn of $('mapGrid').querySelectorAll('button[data-apply]'))btn.onclick=()=>{const id=btn.dataset.apply,m=mapping[id];if(!m?.model)return;const phase=+(m.model.candidatePhase||0),role=String(m.model.function||'unknown');if(!confirm('Apply suggested phase '+(phase||'unknown')+' and role '+role+' for detector '+id+'? These are unvalidated predictions.'))return;if(phase>=1&&phase<=16)m.phase=phase;if(['stop-bar','advance','count','yellow_red','mid','bike','other'].includes(role))m.role=role;m.manualEdited=true;drawMapping();if(data.length)drawMetrics()};
