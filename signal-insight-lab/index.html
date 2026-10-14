@@ -321,6 +321,39 @@ function extraAnalysis(){
  const screens=[];for(const [channel,events] of detectors){let on=null,repeat=0,orphan=0,long=0,rapid=0,max=0;for(let i=0;i<events.length;i++){let e=events[i];if(i&&e.t-events[i-1].t<.3)rapid++;if(e.code===81){if(on!==null)repeat++;on=e.t}else if(on===null)orphan++;else{const d=e.t-on;max=Math.max(max,d);if(d>30)long++;on=null}}screens.push({channel,repeat,orphan,long,rapid,max,open:on!==null})}
  screens.sort((a,b)=>(b.repeat+b.orphan+b.long+b.rapid)-(a.repeat+a.orphan+a.long+a.rapid));
  $('detectorExtra').innerHTML=screens.length?'<h3>Detector ON/OFF integrity screens</h3><div class="wide-table"><table><tr><th>Channel</th><th>Repeated ON</th><th>Unmatched OFF</th><th>ON >30s</th><th>Rapid transitions</th><th>Longest ON</th><th>Open at end</th></tr>'+screens.slice(0,100).map(x=>'<tr><td>'+x.channel+'</td><td>'+x.repeat+'</td><td>'+x.orphan+'</td><td>'+x.long+'</td><td>'+x.rapid+'</td><td>'+fmt(x.max)+' s</td><td>'+(x.open?'Yes':'No')+'</td></tr>').join('')+'</table></div><p class="hint">Screens are not confirmed detector faults; long calls may be expected for presence detectors or queues, and file boundaries can leave events unmatched.</p>':'';
+ // Continuous-call screening: elapsed ON span, rather than assuming file-end ON means a fault.
+ const durationThreshold=120,almostWhole=.9;
+ const firstTime=data[0]?.t??0,lastTime=data.at(-1)?.t??firstTime,windowLen=Math.max(0,lastTime-firstTime);
+ const continuous=[];
+ for(const [channel,events] of detectors){
+  let active=null,longest=0,longStart=null,longEnd=null,allOn=0,intervals=0;
+  for(const e of events){
+   if(e.code===81){if(active===null)active=e.t}
+   else if(active!==null){
+    const d=Math.max(0,e.t-active);
+    if(d>longest){longest=d;longStart=active;longEnd=e.t}
+    allOn+=d;intervals++;active=null;
+   }
+  }
+  const boundaryActive=active!==null;
+  if(boundaryActive){
+   const d=Math.max(0,lastTime-active);
+   if(d>longest){longest=d;longStart=active;longEnd=lastTime}
+  }
+  const share=windowLen>0?Math.min(100,100*allOn/windowLen):0;
+  const possible=longest>=durationThreshold||share>=90;
+  if(!possible)continue;
+  let flag=longest>=Math.max(600,.9*windowLen)&&windowLen>=600?'Near-continuous ON':longest>=durationThreshold?'Extended ON':'High observed occupancy';
+  const phase=mapping[channel]?.phase||'—';
+  continuous.push({channel,longest,longStart,longEnd,share,flag,phase,boundaryActive,intervals});
+ }
+ continuous.sort((a,b)=>b.longest-a.longest);
+ const formatInstant=t=>t==null?'—':new Date(t*1000).toLocaleString();
+ $('detectorExtra').innerHTML+='<h3>Possible stuck-ON / continuous-call detectors</h3>'+
+ '<p class="hint">Screening threshold: 120 seconds continuously ON, or 90% observed complete-pair occupancy. A continuously active detector can contribute to persistent calls, but MAX recall is a controller configuration and cannot be established from ON/OFF events alone. Confirm cabinet programming and lane conditions before treating these as alarms.</p>'+
+ (continuous.length?'<div class="wide-table"><table><tr><th>Channel</th><th>Flag</th><th>Longest ON</th><th>Start</th><th>End</th><th>Observed ON %*</th><th>Mapped phase</th><th>ON at file end</th></tr>'+
+ continuous.slice(0,120).map(v=>'<tr><td>'+v.channel+'</td><td>'+esc(v.flag)+'</td><td>'+fmt(v.longest)+' s</td><td>'+esc(formatInstant(v.longStart))+'</td><td>'+esc(formatInstant(v.longEnd))+'</td><td>'+fmt(v.share)+'%</td><td>'+v.phase+'</td><td>'+(v.boundaryActive?'Yes':'No')+'</td></tr>').join('')+'</table></div>':'<p class="hint">No continuous ON intervals reached the screening threshold in the available records.</p>')+
+ '<p class="hint">*Observed ON % uses complete ON/OFF intervals and can underestimate occupancy when the log begins or ends mid-call. ON at file end is not proof of a stuck detector. Review possible incomplete or corrupted logs.</p>';
  $('mappingSummary').innerHTML='<p class="hint">'+screens.filter(x=>mapping[x.channel]?.phase>0).length+' of '+screens.length+' observed channels assigned to phases. Confirm detector location and role before interpreting arrival metrics.</p>';
  let ref=+$('refPhase').value,cycle=+$('expectedCycle').value,tolerance=+$('cycleTolerance').value,starts=data.filter(e=>e.code===1&&e.param===ref).map(e=>e.t),windows=[];
  for(let i=1;i<starts.length;i++){let a=starts[i-1],b=starts[i],d=b-a,served=[...new Set(data.filter(e=>e.t>=a&&e.t<b&&e.code===1).map(e=>e.param))].sort((x,y)=>x-y);let note=d<=0?'Invalid interval':d>600?'Very long interval':Math.abs(d-cycle)/cycle*100>tolerance?'Cycle length deviation — review operation mode':'—';windows.push({i,start:a,end:b,d,served:served.join(' '),note})}
